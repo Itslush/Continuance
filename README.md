@@ -1,5 +1,3 @@
-Here is a more reserved, technical introduction that details the specific functionality of the application.
-
 # **Continuance**
 
 > (Formerly *Bubbles07-Reborn*)
