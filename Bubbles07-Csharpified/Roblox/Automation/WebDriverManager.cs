@@ -1,108 +1,182 @@
-﻿using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Support.UI;
-using OpenQA.Selenium;
+﻿using PuppeteerSharp;
 using Continuance.Models;
-using Continuance.UI;
+using Spectre.Console;
+using Continuance.CLI;
 
 namespace Continuance.Roblox.Automation
 {
     public class WebDriverManager
     {
-        public static IWebDriver? StartBrowserWithCookie(Account account, string url, bool headless = false)
+        private static bool _browserDownloaded = false;
+        private static readonly string[] InteractiveArgs =
+        [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--window-size=1280,720"
+        ];
+
+        private static readonly string[] HeadlessArgs =
+        [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-extensions",
+            "--window-size=1280,720"
+        ];
+
+        private static readonly string[] IgnoredArgs = ["--enable-automation"];
+
+        public static async Task EnsureBrowserDownloadedAsync()
         {
+            if (_browserDownloaded) return;
+
+            var browserFetcher = new BrowserFetcher();
+
+            Logger.LogInfo("Verifying Chromium browser for automation...");
+
+            await AnsiConsole.Status()
+                .StartAsync("Downloading Chromium...", async ctx =>
+                {
+                    await browserFetcher.DownloadAsync();
+                });
+
+            Logger.LogSuccess("Chromium is ready.");
+            _browserDownloaded = true;
+        }
+
+        public static async Task<string?> CaptureCookieInteractiveAsync()
+        {
+            await EnsureBrowserDownloadedAsync();
+            IBrowser? browser = null;
+            try
+            {
+                Logger.LogInfo("Initializing Interactive Browser...");
+
+                browser = await Puppeteer.LaunchAsync(new LaunchOptions
+                {
+                    Headless = false,
+                    DefaultViewport = null,
+                    Args = InteractiveArgs,
+                    IgnoredDefaultArgs = IgnoredArgs
+                });
+
+                var pages = await browser.PagesAsync();
+                var page = pages.Length > 0 ? pages[0] : await browser.NewPageAsync();
+
+                Logger.LogInfo("Navigating to Roblox Login...");
+                await page.GoToAsync("https://www.roblox.com/login", new NavigationOptions { Timeout = 60000 });
+
+                string? detectedCookie = null;
+
+                await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Waiting for user to log in...", async ctx =>
+                    {
+                        while (true)
+                        {
+                            if (browser.IsClosed) break;
+
+                            try
+                            {
+                                var cookies = await page.GetCookiesAsync("https://www.roblox.com");
+                                var securityCookie = cookies.FirstOrDefault(c => c.Name == ".ROBLOSECURITY");
+
+                                if (securityCookie != null && !string.IsNullOrWhiteSpace(securityCookie.Value))
+                                {
+                                    if (securityCookie.Value.Contains("WARNING"))
+                                    {
+                                        detectedCookie = securityCookie.Value;
+                                        ctx.Status("Login detected! Capturing cookie...");
+                                        await Task.Delay(1000);
+                                        break;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                break;
+                            }
+
+                            await Task.Delay(1000);
+                        }
+                    });
+
+                return detectedCookie;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Browser Login Error: {Markup.Escape(ex.Message)}");
+                return null;
+            }
+            finally
+            {
+                if (browser != null) await browser.CloseAsync();
+            }
+        }
+
+        public static async Task<IBrowser?> StartBrowserWithCookie(Account account, string url, bool headless = false)
+        {
+            await EnsureBrowserDownloadedAsync();
+
             if (string.IsNullOrWhiteSpace(account.Cookie))
             {
-                ConsoleUI.WriteErrorLine($"Cannot start browser for {account.Username}: Account cookie is missing.");
+                Logger.LogError($"Cannot start browser for {Markup.Escape(account.Username)}: Account cookie is missing.");
                 return null;
             }
             try
             {
-                var options = new ChromeOptions();
-                ConsoleUI.WriteInfoLine("Initializing WebDriver instance...");
+                Logger.LogInfo($"Initializing Puppeteer Browser (Headless: {headless})...");
 
-                if (headless || !Environment.UserInteractive || Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true")
+                var launchOptions = new LaunchOptions
                 {
-                    ConsoleUI.WriteInfoLine("Configuring WebDriver :: Headless Mode Activated.");
-                    options.AddArgument("--headless=new");
-                    options.AddArgument("--disable-gpu");
-                }
+                    Headless = headless,
+                    DefaultViewport = null,
+                    Args = HeadlessArgs,
+                    IgnoredDefaultArgs = IgnoredArgs
+                };
 
-                options.AddArgument("--disable-extensions");
-                options.AddArgument("--no-sandbox");
-                options.AddArgument("--disable-dev-shm-usage");
-                options.AddArgument("--window-size=400,400");
-                options.AddArgument("--log-level=3");
+                IBrowser browser = await Puppeteer.LaunchAsync(launchOptions);
+                var pages = await browser.PagesAsync();
+                var page = pages.Length > 0 ? pages[0] : await browser.NewPageAsync();
 
-                options.AddExcludedArgument("enable-logging");
-                options.AddExcludedArgument("enable-automation");
-                options.AddAdditionalOption("useAutomationExtension", false);
+                Logger.LogInfo("Setting authentication cookie...");
 
-                ChromeDriverService service = ChromeDriverService.CreateDefaultService();
-                service.HideCommandPromptWindow = true;
-                service.SuppressInitialDiagnosticInformation = true;
+                await page.SetCookieAsync(new CookieParam
+                {
+                    Name = ".ROBLOSECURITY",
+                    Value = account.Cookie,
+                    Domain = ".roblox.com",
+                    Path = "/",
+                    Secure = true,
+                    HttpOnly = true,
+                    SameSite = SameSite.Lax,
+                    Expires = DateTimeOffset.Now.AddYears(1).ToUnixTimeSeconds()
+                });
 
-                ConsoleUI.WriteInfoLine("Creating ChromeDriver...");
-                IWebDriver driver = new ChromeDriver(service, options);
-                ConsoleUI.WriteInfoLine("ChromeDriver created.");
+                Logger.LogInfo($"Navigating to target URL: {Markup.Escape(url)}");
 
-                driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(60);
-
-                ConsoleUI.WriteInfoLine("Navigating to Roblox.com to set cookie...");
-                driver.Navigate().GoToUrl("https://www.roblox.com/login");
-                Task.Delay(1000).Wait();
-
-                driver.Manage().Cookies.DeleteAllCookies();
-                ConsoleUI.WriteInfoLine("Purged existing browser cookies.");
-
-                var seleniumCookie = new Cookie(
-                     name: ".ROBLOSECURITY",
-                     value: account.Cookie,
-                     domain: ".roblox.com",
-                     path: "/",
-                     expiry: DateTime.Now.AddYears(1),
-                     secure: true,
-                     isHttpOnly: true,
-                     sameSite: "Lax"
-                     );
-
-                driver.Manage().Cookies.AddCookie(seleniumCookie);
-                ConsoleUI.WriteSuccessLine("ROBLOSECURITY Cookie Injected into WebDriver.");
-                Task.Delay(500).Wait();
-
-                ConsoleUI.WriteInfoLine($"Navigating WebDriver to target URL: {url}");
-                driver.Navigate().GoToUrl(url);
+                // Optimized WaitUntil using collection expression
+                await page.GoToAsync(url, new NavigationOptions
+                {
+                    Timeout = 60000,
+                    WaitUntil = [WaitUntilNavigation.DOMContentLoaded]
+                });
 
                 try
                 {
-                    WebDriverWait wait = new WebDriverWait(driver, TimeSpan.FromSeconds(15));
-                    wait.Until(d => d.FindElement(By.CssSelector("#nav-robux-balance, #nav-username")) != null);
-                    ConsoleUI.WriteSuccessLine("Login Confirmed via Page Element.");
+                    await page.WaitForSelectorAsync("#nav-robux-balance, #nav-username", new WaitForSelectorOptions { Timeout = 15000 });
+                    Logger.LogSuccess("Login Confirmed via Page Element.");
                 }
-                catch (WebDriverTimeoutException)
+                catch (WaitTaskTimeoutException)
                 {
-                    ConsoleUI.WriteWarningLine("Could not confirm successful login via page element after setting cookie. Proceeding anyway.");
-                }
-                catch (NoSuchElementException)
-                {
-                    ConsoleUI.WriteWarningLine("Login confirmation element not found. Proceeding anyway.");
+                    Logger.LogWarning("Could not confirm successful login via page element. Proceeding anyway.");
                 }
 
-                ConsoleUI.WriteSuccessLine("Navigation Complete.");
-                return driver;
+                return browser;
             }
             catch (Exception ex)
             {
-                ConsoleUI.WriteErrorLine($"WebDriver Initialization Error for {account.Username}: {ex.Message}");
-                if (ex.InnerException != null) ConsoleUI.WriteErrorLine($"Inner Exception: {ex.InnerException.Message}");
-
-                if (ex is WebDriverException || ex.Message.Contains("chromedriver", StringComparison.CurrentCultureIgnoreCase))
-                {
-                    ConsoleUI.WriteWarningLine("Hint: Ensure 'chromedriver' (or 'chromedriver.exe') is in your system's PATH or the application's directory, is executable, and matches your installed Chrome browser version.");
-
-                    if (OperatingSystem.IsWindows()) ConsoleUI.WriteWarningLine("Windows: Download from https://googlechromelabs.github.io/chrome-for-testing/ and place chromedriver.exe next to your program or in PATH.");
-                    else if (OperatingSystem.IsLinux()) ConsoleUI.WriteWarningLine("Linux: Use package manager (e.g., 'sudo apt install chromium-chromedriver') or download and place in PATH, ensure executable ('chmod +x chromedriver').");
-                    else if (OperatingSystem.IsMacOS()) ConsoleUI.WriteWarningLine("macOS: Use Homebrew ('brew install chromedriver') or download, place in PATH, and allow execution (System Preferences > Security & Privacy).");
-                }
+                Logger.LogError($"Browser Init Error for {Markup.Escape(account.Username)}: {Markup.Escape(ex.Message)}");
                 return null;
             }
         }

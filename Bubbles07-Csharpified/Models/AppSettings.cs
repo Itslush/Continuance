@@ -14,5 +14,8 @@
         public int DefaultFriendGoal { get; set; } = AppConfig.DefaultFriendGoal;
         public int DefaultBadgeGoal { get; set; } = AppConfig.DefaultBadgeGoal;
         public int ActionConfirmationThreshold { get; set; } = 15;
+        public int ImportDelayMs { get; set; } = AppConfig.DefaultImportDelayMs;
+        public bool HeadlessMode { get; set; } = false;
+        public ColorPalette Theme { get; set; } = new();
     }
 }

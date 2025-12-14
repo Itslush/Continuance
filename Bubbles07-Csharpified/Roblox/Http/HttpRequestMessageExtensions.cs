@@ -30,7 +30,7 @@
             {
                 if (option.Value != null) clone.Options.TryAdd(option.Key, option.Value);
             }
-
+    
             #endif
 
             foreach (KeyValuePair<string, IEnumerable<string>> header in req.Headers)

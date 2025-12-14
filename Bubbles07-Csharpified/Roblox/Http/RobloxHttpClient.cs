@@ -1,22 +1,24 @@
-﻿using Newtonsoft.Json.Linq;
-using System.Text.RegularExpressions;
-using System.Net;
+﻿using Continuance.Models;
 using Newtonsoft.Json;
-using Continuance.Models;
-using Continuance.UI;
+using Newtonsoft.Json.Linq;
+using Spectre.Console;
+using System.Net;
+using System.Text.RegularExpressions;
+using Continuance.CLI;
 
 namespace Continuance.Roblox.Http
 {
     public class RobloxHttpClient
     {
-        private static readonly HttpClient httpClient = new HttpClient(new HttpClientHandler
+        private static readonly HttpClient httpClient = new(new HttpClientHandler
         {
             UseCookies = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         });
+
         private const int XcsrfRetryDelayMs = AppConfig.XcsrfRetryDelayMs;
 
-        private static readonly HttpClient externalHttpClient = new HttpClient(new HttpClientHandler
+        private static readonly HttpClient externalHttpClient = new(new HttpClientHandler
         {
             UseCookies = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
@@ -27,7 +29,7 @@ namespace Continuance.Roblox.Http
         {
             if (!Uri.TryCreate(url, UriKind.Absolute, out _))
             {
-                ConsoleUI.WriteErrorLine($"Invalid URL format provided: {url}");
+                Logger.LogError($"Invalid URL format provided: {Markup.Escape(url)}");
                 throw new ArgumentException("Invalid URL format", nameof(url));
             }
 
@@ -50,22 +52,16 @@ namespace Continuance.Roblox.Http
             return request;
         }
 
-        public static async Task<(HttpStatusCode? StatusCode, bool IsSuccess, string Content)> SendRequest(
-            HttpMethod method,
-            string url,
-            Account account,
-            HttpContent? content = null,
-            string actionDescription = "API request",
-            bool allowRetryOnXcsrf = true,
-            Action<HttpRequestMessage>? configureRequest = null)
+        public static async Task<(HttpStatusCode? StatusCode, bool IsSuccess, string Content)> SendRequest(HttpMethod method, string url, Account account, HttpContent? content = null, string actionDescription = "API request", bool allowRetryOnXcsrf = true, Action<HttpRequestMessage>? configureRequest = null, bool suppressOutput = true)
         {
             if (account == null && (method == HttpMethod.Post || method == HttpMethod.Patch || method == HttpMethod.Delete || allowRetryOnXcsrf))
             {
-                ConsoleUI.WriteErrorLine($"Cannot send modifying request '{actionDescription}': Account object is null.");
+                if (!suppressOutput) Logger.LogError($"Cannot send modifying request '{Markup.Escape(actionDescription)}': Account object is null.");
                 return (null, false, "Account object was null for an authenticated request.");
             }
 
             HttpRequestMessage request;
+            var escapedActionDescription = Markup.Escape(actionDescription);
 
             try
             {
@@ -74,16 +70,16 @@ namespace Continuance.Roblox.Http
             }
             catch (ArgumentException ex)
             {
-                ConsoleUI.WriteErrorLine($"Request Creation Failed for '{actionDescription}': {ex.Message}");
+                if (!suppressOutput) Logger.LogError($"Request Creation Failed for '{escapedActionDescription}': {Markup.Escape(ex.Message)}");
                 return (null, false, ex.Message);
             }
             catch (Exception ex)
             {
-                ConsoleUI.WriteErrorLine($"Unexpected Error Creating Request for '{actionDescription}': {ex.Message}");
+                if (!suppressOutput) Logger.LogError($"Unexpected Error Creating Request for '{escapedActionDescription}': {Markup.Escape(ex.Message)}");
                 return (null, false, $"Unexpected error during request creation: {ex.Message}");
             }
-
             bool retried = false;
+
             retry_request:
             HttpResponseMessage? response = null;
 
@@ -99,7 +95,7 @@ namespace Continuance.Roblox.Http
                     }
                     else if (allowRetryOnXcsrf && (method == HttpMethod.Post || method == HttpMethod.Patch || method == HttpMethod.Delete))
                     {
-                        ConsoleUI.WriteWarningLine($"Attempting modifying request '{actionDescription}' for {account.Username} with missing XCSRF.");
+                        if (!suppressOutput) Logger.LogWarning($"Attempting modifying request '{escapedActionDescription}' for {Markup.Escape(account.Username)} with missing XCSRF.");
                     }
                 }
 
@@ -111,8 +107,12 @@ namespace Continuance.Roblox.Http
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    string username = account?.Username ?? "N/A";
-                    ConsoleUI.WriteErrorLine($"[-] FAILED: {actionDescription} for {username}. Code: {(int)response.StatusCode} ({response.ReasonPhrase}). URL: {ConsoleUI.Truncate(url, 60)}. Data: {ConsoleUI.Truncate(responseContent)}");
+                    string username = Markup.Escape(account?.Username ?? "N/A");
+                    if (!suppressOutput)
+                    {
+                        string failedMessage = $"FAILED: {escapedActionDescription} for {username}. Code: {(int)response.StatusCode} ({Markup.Escape(response.ReasonPhrase?.ToString() ?? "")}). URL: {ConsoleUI.Truncate(url, 60)}. Data: {ConsoleUI.Truncate(responseContent)}";
+                        Logger.LogError(failedMessage);
+                    }
 
                     if (response.StatusCode == HttpStatusCode.Forbidden &&
                         response.Headers.TryGetValues("X-CSRF-TOKEN", out var csrfHeaderValues) &&
@@ -121,7 +121,7 @@ namespace Continuance.Roblox.Http
                         string? newToken = csrfHeaderValues?.FirstOrDefault()?.Trim();
                         if (!string.IsNullOrEmpty(newToken) && newToken != account.XcsrfToken)
                         {
-                            ConsoleUI.WriteErrorLine($"XCSRF Rotation Detected for {account.Username}. Updating token and retrying...");
+                            if (!suppressOutput) Logger.LogWarning($"XCSRF Rotation Detected for {Markup.Escape(account.Username)}. Updating token and retrying...");
                             account.XcsrfToken = newToken;
                             await Task.Delay(XcsrfRetryDelayMs);
                             retried = true;
@@ -130,22 +130,22 @@ namespace Continuance.Roblox.Http
                         }
                         else if (newToken == account.XcsrfToken)
                         {
-                            ConsoleUI.WriteWarningLine($"Received 403 Forbidden for {account.Username} but XCSRF token in response header did not change. Not retrying automatically. ({actionDescription})");
+                            if (!suppressOutput) Logger.LogWarning($"Received 403 Forbidden for {Markup.Escape(account.Username)} but XCSRF token in response header did not change. Not retrying automatically. ({escapedActionDescription})");
                         }
                         else
                         {
-                            ConsoleUI.WriteWarningLine($"Received 403 Forbidden for {account.Username} but X-CSRF-TOKEN header was missing or empty in response. Cannot retry based on this. ({actionDescription})");
+                            if (!suppressOutput) Logger.LogWarning($"Received 403 Forbidden for {Markup.Escape(account.Username)} but X-CSRF-TOKEN header was missing or empty in response. Cannot retry based on this. ({escapedActionDescription})");
                         }
                     }
                     else if (response.StatusCode == HttpStatusCode.TooManyRequests)
                     {
-                        ConsoleUI.WriteErrorLine($"RATE LIMITED (429) on '{actionDescription}' for {username}. Consider increasing delays. Failing action.");
+                        if (!suppressOutput) Logger.LogError($"RATE LIMITED (429) on '{escapedActionDescription}' for {username}. Consider increasing delays. Failing action.");
                         await Task.Delay(AppConfig.RateLimitRetryDelayMs);
                         return (response.StatusCode, false, responseContent);
                     }
                     else if (response.StatusCode == HttpStatusCode.Unauthorized && account != null)
                     {
-                        ConsoleUI.WriteErrorLine($"UNAUTHORIZED (401) on '{actionDescription}' for {account.Username}. Cookie might be invalid. Marking account invalid.");
+                        if (!suppressOutput) Logger.LogError($"UNAUTHORIZED (401) on '{escapedActionDescription}' for {Markup.Escape(account.Username)}. Cookie might be invalid. Marking account invalid.");
                         account.IsValid = false;
                         account.XcsrfToken = "";
                         return (response.StatusCode, false, responseContent);
@@ -160,18 +160,22 @@ namespace Continuance.Roblox.Http
             }
             catch (HttpRequestException hrex)
             {
-                ConsoleUI.WriteErrorLine($"NETWORK EXCEPTION: During '{actionDescription}' for {account?.Username ?? "N/A"}: {hrex.Message} (StatusCode: {hrex.StatusCode})");
+                if (!suppressOutput) Logger.LogError($"NETWORK EXCEPTION: During '{escapedActionDescription}' for {Markup.Escape(account?.Username ?? "N/A")}: {Markup.Escape(hrex.Message)} (StatusCode: {hrex.StatusCode})");
                 return (hrex.StatusCode, false, hrex.Message);
             }
 
             catch (TaskCanceledException)
             {
-                ConsoleUI.WriteErrorLine($"TIMEOUT/CANCELLED: During '{actionDescription}' for {account?.Username ?? "N/A"} (Timeout: {AppConfig.DefaultRequestTimeoutSec}s): Request cancelled or timed out.");
+                if (!suppressOutput) Logger.LogError($"TIMEOUT/CANCELLED: During '{escapedActionDescription}' for {Markup.Escape(account?.Username ?? "N/A")} (Timeout: {AppConfig.DefaultRequestTimeoutSec}s): Request cancelled or timed out.");
                 return (HttpStatusCode.RequestTimeout, false, "Request timed out or was cancelled.");
             }
             catch (Exception ex)
             {
-                ConsoleUI.WriteErrorLine($"GENERAL EXCEPTION: During '{actionDescription}' for {account?.Username ?? "N/A"}: {ex.GetType().Name} - {ex.Message}");
+                if (!suppressOutput)
+                {
+                    string generalExceptionMarkup = $"GENERAL EXCEPTION: During '{escapedActionDescription}' for {Markup.Escape(account?.Username ?? "N/A")}: {Markup.Escape(ex.GetType().Name)} - {Markup.Escape(ex.Message)}";
+                    Logger.LogError(generalExceptionMarkup);
+                }
                 return (null, false, ex.Message);
             }
             finally
@@ -180,7 +184,7 @@ namespace Continuance.Roblox.Http
             }
         }
 
-        public async Task<bool> SendRequestAsync(
+        public static async Task<bool> SendRequestAsync(
             HttpMethod method,
             string url,
             Account account,
@@ -193,7 +197,7 @@ namespace Continuance.Roblox.Http
             return isSuccess;
         }
 
-        public static async Task<(bool IsValid, long UserId, string Username)> ValidateCookieAsync(string cookie)
+        public static async Task<(bool IsValid, long UserId, string Username)> ValidateCookieAsync(string cookie, bool suppressOutput = true)
         {
             if (string.IsNullOrWhiteSpace(cookie)) return (false, 0, "N/A");
 
@@ -216,7 +220,7 @@ namespace Continuance.Roblox.Http
                     try { accountInfo = JObject.Parse(jsonString); }
                     catch (JsonReaderException jex)
                     {
-                        ConsoleUI.WriteErrorLine($"Validation JSON Parse Error: {jex.Message} Response: {ConsoleUI.Truncate(jsonString)}");
+                        if (!suppressOutput) Logger.LogError($"Validation JSON Parse Error: {Markup.Escape(jex.Message)} Response: {ConsoleUI.Truncate(jsonString)}");
                         return (false, 0, "N/A");
                     }
 
@@ -229,34 +233,34 @@ namespace Continuance.Roblox.Http
                     }
                     else
                     {
-                        ConsoleUI.WriteErrorLine($"Validation Error: Parsed user ID ({userId}) or username ('{username ?? "null"}') was invalid from response: {ConsoleUI.Truncate(jsonString)}");
+                        if (!suppressOutput) Logger.LogError($"Validation Error: Parsed user ID ({userId}) or username ('{Markup.Escape(username ?? "null")}') was invalid from response: {ConsoleUI.Truncate(jsonString)}");
                         return (false, 0, "N/A");
                     }
                 }
                 else if (response.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    ConsoleUI.WriteErrorLine($"Validation Failed: API request returned {response.StatusCode} (Unauthorized). Cookie is likely invalid or expired.");
+                    if (!suppressOutput) Logger.LogError($"Validation Failed: API request returned {response.StatusCode} (Unauthorized). Cookie is likely invalid or expired.");
                     return (false, 0, "N/A");
                 }
                 else
                 {
-                    ConsoleUI.WriteErrorLine($"Validation Failed: API request returned status {(int)response.StatusCode} ({response.ReasonPhrase}). Response: {ConsoleUI.Truncate(jsonString)}");
+                    if (!suppressOutput) Logger.LogError($"Validation Failed: API request returned status {(int)response.StatusCode} ({Markup.Escape(response.ReasonPhrase ?? "")}). Response: {ConsoleUI.Truncate(jsonString)}");
                     return (false, 0, "N/A");
                 }
             }
-            catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"Validation Timeout ({TimeSpan.FromSeconds(15).TotalSeconds}s)."); }
-            catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"Validation Network Error: {hrex.Message} (StatusCode: {hrex.StatusCode})"); }
-            catch (Exception ex) { ConsoleUI.WriteErrorLine($"Validation Exception: {ex.GetType().Name} - {ex.Message}"); }
+            catch (OperationCanceledException) { if (!suppressOutput) Logger.LogError($"Validation Timeout ({TimeSpan.FromSeconds(15).TotalSeconds}s)."); }
+            catch (HttpRequestException hrex) { if (!suppressOutput) Logger.LogError($"Validation Network Error: {Markup.Escape(hrex.Message)} (StatusCode: {hrex.StatusCode})"); }
+            catch (Exception ex) { if (!suppressOutput) Logger.LogError($"Validation Exception: {Markup.Escape(ex.GetType().Name)} - {Markup.Escape(ex.Message)}"); }
             finally { response?.Dispose(); }
 
             return (false, 0, "N/A");
         }
 
-        public static async Task<string> FetchXCSRFTokenAsync(string cookie)
+        public static async Task<string> FetchXCSRFTokenAsync(string cookie, bool suppressOutput = true)
         {
             if (string.IsNullOrWhiteSpace(cookie)) return "";
 
-            ConsoleUI.WriteInfoLine($"Attempting XCSRF token acquisition...");
+            if (!suppressOutput) Logger.LogInfo("Attempting XCSRF token acquisition...");
 
             string logoutUrl = AppConfig.RobloxApiBaseUrl_Auth + "/v2/logout";
             using var logoutReq = new HttpRequestMessage(HttpMethod.Post, logoutUrl);
@@ -276,18 +280,17 @@ namespace Continuance.Roblox.Http
                     string? token = csrfHeaderValues?.FirstOrDefault();
                     if (!string.IsNullOrEmpty(token))
                     {
-                        ConsoleUI.WriteSuccessLine($"XCSRF acquired via POST /logout.");
+                        if (!suppressOutput) Logger.LogSuccess("XCSRF acquired via POST /logout.");
                         return token.Trim();
                     }
                 }
-                ConsoleUI.WriteErrorLine($"POST /logout failed or didn't return token ({response?.StatusCode ?? HttpStatusCode.Unused}). Trying next method...");
+                if (!suppressOutput) Logger.LogError($"POST /logout failed or didn't return token ({response?.StatusCode ?? HttpStatusCode.Unused}). Trying next method...");
             }
-            catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) timeout."); }
-            catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) network exception: {hrex.Message}"); }
-            catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST /logout) exception: {ex.GetType().Name} - {ex.Message}"); }
+            catch (OperationCanceledException) { if (!suppressOutput) Logger.LogError("XCSRF fetch (POST /logout) timeout."); }
+            catch (HttpRequestException hrex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (POST /logout) network exception: {Markup.Escape(hrex.Message)}"); }
+            catch (Exception ex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (POST /logout) exception: {Markup.Escape(ex.GetType().Name)} - {Markup.Escape(ex.Message)}"); }
 
             finally { response?.Dispose(); }
-
 
             string bdayUrl = AppConfig.RobloxApiBaseUrl_AccountInfo + "/v1/birthdate";
             using var bdayReq = new HttpRequestMessage(HttpMethod.Post, bdayUrl);
@@ -308,16 +311,16 @@ namespace Continuance.Roblox.Http
                     string? token = csrfHeaderValues?.FirstOrDefault();
                     if (!string.IsNullOrEmpty(token))
                     {
-                        ConsoleUI.WriteSuccessLine($"XCSRF acquired via POST {bdayUrl}.");
+                        if (!suppressOutput) Logger.LogSuccess($"XCSRF acquired via POST {bdayUrl}.");
                         return token.Trim();
                     }
                 }
-                ConsoleUI.WriteErrorLine($"POST {bdayUrl} failed or didn't return token ({response?.StatusCode ?? HttpStatusCode.Unused}). Trying scrape...");
+                if (!suppressOutput) Logger.LogError($"POST {bdayUrl} failed or didn't return token ({response?.StatusCode ?? HttpStatusCode.Unused}). Trying scrape...");
             }
 
-            catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) timeout."); }
-            catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) network exception: {hrex.Message}"); }
-            catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (POST {bdayUrl}) exception: {ex.GetType().Name} - {ex.Message}"); }
+            catch (OperationCanceledException) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (POST {bdayUrl}) timeout."); }
+            catch (HttpRequestException hrex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (POST {bdayUrl}) network exception: {Markup.Escape(hrex.Message)}"); }
+            catch (Exception ex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (POST {bdayUrl}) exception: {Markup.Escape(ex.GetType().Name)} - {Markup.Escape(ex.Message)}"); }
 
             finally { response?.Dispose(); }
 
@@ -348,27 +351,28 @@ namespace Continuance.Roblox.Http
                         try
                         {
                             Match match = kvp.Value.Match(html);
+
                             if (match.Success && match.Groups.Count > 1 && !string.IsNullOrWhiteSpace(match.Groups[1].Value))
                             {
-                                ConsoleUI.WriteSuccessLine($"XCSRF acquired via scrape (Method: {kvp.Key}).");
+                                if (!suppressOutput) Logger.LogSuccess($"XCSRF acquired via scrape (Method: {kvp.Key}).");
                                 return match.Groups[1].Value.Trim();
                             }
                         }
-                        catch (RegexMatchTimeoutException) { ConsoleUI.WriteWarningLine($"XCSRF fetch (Scrape) regex timeout for pattern: {kvp.Key}."); }
+                        catch (RegexMatchTimeoutException) { if (!suppressOutput) Logger.LogWarning($"XCSRF fetch (Scrape) regex timeout for pattern: {kvp.Key}."); }
                     }
 
-                    ConsoleUI.WriteWarningLine($"Scrape successful ({response.StatusCode}) but token not found in HTML content with known patterns.");
+                    if (!suppressOutput) Logger.LogWarning($"Scrape successful ({response.StatusCode}) but token not found in HTML content with known patterns.");
                 }
-                else { ConsoleUI.WriteErrorLine($"Scrape failed ({response.StatusCode})."); }
+                else { if (!suppressOutput) Logger.LogError($"Scrape failed ({response.StatusCode})."); }
             }
 
-            catch (OperationCanceledException) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) timeout."); }
-            catch (HttpRequestException hrex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) network exception: {hrex.Message}"); }
-            catch (Exception ex) { ConsoleUI.WriteErrorLine($"XCSRF fetch (Scrape) exception: {ex.GetType().Name} - {ex.Message}"); }
+            catch (OperationCanceledException) { if (!suppressOutput) Logger.LogError("XCSRF fetch (Scrape) timeout."); }
+            catch (HttpRequestException hrex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (Scrape) network exception: {Markup.Escape(hrex.Message)}"); }
+            catch (Exception ex) { if (!suppressOutput) Logger.LogError($"XCSRF fetch (Scrape) exception: {Markup.Escape(ex.GetType().Name)} - {Markup.Escape(ex.Message)}"); }
 
             finally { response?.Dispose(); }
 
-            ConsoleUI.WriteErrorLine("Failed to acquire XCSRF Token using all methods.");
+            if (!suppressOutput) Logger.LogError("Failed to acquire XCSRF Token using all methods.");
 
             return "";
         }

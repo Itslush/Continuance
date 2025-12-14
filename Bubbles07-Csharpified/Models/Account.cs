@@ -1,4 +1,6 @@
-﻿namespace Continuance.Models
+﻿using Spectre.Console;
+
+namespace Continuance.Models
 {
     public class Account
     {
@@ -10,7 +12,7 @@
         public override string ToString()
         {
             string validity = IsValid ? "[OK]" : "[BAD]";
-            return $"{validity} {UserId}, {Username}";
+            return $"{validity} {UserId}, {Markup.Escape(Username)}";
         }
     }
 }

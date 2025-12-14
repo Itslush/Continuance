@@ -4,7 +4,7 @@ using System.Text;
 using System.Net;
 using Continuance.Models;
 using Continuance.Roblox.Http;
-using Continuance.UI;
+using Continuance.CLI;
 
 namespace Continuance.Roblox.Services
 {
@@ -12,8 +12,10 @@ namespace Continuance.Roblox.Services
     {
         private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
 
-        public async Task<(bool Success, bool IsPendingOrFriends, string FailureReason)> SendFriendRequestAsync(Account account, long friendUserId, string friendUsername)
+        public static async Task<(bool Success, bool IsPendingOrFriends, string FailureReason)> SendFriendRequestAsync(Account account, long friendUserId, string friendUsername)
         {
+            await AuthenticationService.RefreshXCSRFTokenIfNeededAsync(account);
+
             if (account == null) return (false, false, "Account is null.");
             if (string.IsNullOrEmpty(account.XcsrfToken)) return (false, false, "Missing XCSRF token.");
             if (friendUserId <= 0) return (false, false, $"Invalid friend User ID ({friendUserId}).");
@@ -45,7 +47,7 @@ namespace Continuance.Roblox.Services
                         if (errorJson["errors"] is JArray errors &&
                             errors.Any(err => err["code"]?.Value<int>() == 5))
                         {
-                            ConsoleUI.WriteWarningLine($"    -> Send Fail (Code 5: Request likely pending or already friends with {friendUsername}).");
+                            Logger.LogWarning($"Send Fail (Code 5: Request likely pending or already friends with {friendUsername}).");
                             return (false, true, "Request pending or already friends (Code 5).");
                         }
                     }
@@ -56,21 +58,21 @@ namespace Continuance.Roblox.Services
             }
         }
 
-        public async Task<bool> AcceptFriendRequestAsync(Account account, long friendUserId, string friendUsername)
+        public static async Task<bool> AcceptFriendRequestAsync(Account account, long friendUserId, string friendUsername)
         {
-            if (account == null) { ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest: Account is null."); return false; }
+            if (account == null) { Logger.LogError("Cannot AcceptFriendRequest: Account is null."); return false; }
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteWarningLine($"Cannot AcceptFriendRequest for {account.Username}: Missing XCSRF token.");
+                Logger.LogWarning($"Cannot AcceptFriendRequest for {account.Username}: Missing XCSRF token.");
                 return false;
             }
-            if (friendUserId <= 0) { ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest for {account.Username}: Invalid friend User ID ({friendUserId})."); return false; }
-            if (account.UserId == friendUserId) { ConsoleUI.WriteErrorLine($"Cannot AcceptFriendRequest for {account.Username}: Cannot accept request from yourself."); return false; }
+            if (friendUserId <= 0) { Logger.LogError($"Cannot AcceptFriendRequest for {account.Username}: Invalid friend User ID ({friendUserId})."); return false; }
+            if (account.UserId == friendUserId) { Logger.LogError($"Cannot AcceptFriendRequest for {account.Username}: Cannot accept request from yourself."); return false; }
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{friendUserId}/accept-friend-request";
             var content = new StringContent("{}", Encoding.UTF8, "application/json");
 
-            bool success = await _robloxHttpClient.SendRequestAsync(
+            bool success = await RobloxHttpClient.SendRequestAsync(
                 HttpMethod.Post,
                 url,
                 account,
@@ -82,10 +84,10 @@ namespace Continuance.Roblox.Services
             return success;
         }
 
-        public async Task<int> GetFriendCountAsync(Account account)
+        public static async Task<int> GetFriendCountAsync(Account account)
         {
-            if (account == null) { ConsoleUI.WriteErrorLine($"Cannot GetFriendCount: Account is null."); return -1; }
-            if (account.UserId <= 0) { ConsoleUI.WriteErrorLine($"Cannot GetFriendCount: Invalid User ID ({account.UserId}) in Account object."); return -1; }
+            if (account == null) { Logger.LogError("Cannot GetFriendCount: Account is null."); return -1; }
+            if (account.UserId <= 0) { Logger.LogError($"Cannot GetFriendCount: Invalid User ID ({account.UserId}) in Account object."); return -1; }
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Friends}/v1/users/{account.UserId}/friends/count";
 
@@ -95,7 +97,8 @@ namespace Continuance.Roblox.Services
                 account,
                 null,
                 "Get Friend Count",
-                allowRetryOnXcsrf: false
+                allowRetryOnXcsrf: false,
+                suppressOutput: true
             );
 
             if (success && !string.IsNullOrEmpty(content))
@@ -109,14 +112,14 @@ namespace Continuance.Roblox.Services
                     }
                     else
                     {
-                        ConsoleUI.WriteErrorLine($"Could not parse friend count (missing/invalid 'count' property) from response for {account.Username}: {ConsoleUI.Truncate(content)}");
+                        Logger.LogError($"Could not parse friend count (missing/invalid 'count' property) from response for {account.Username}: {ConsoleUI.Truncate(content)}");
                     }
                 }
                 catch (JsonReaderException jex)
                 {
-                    ConsoleUI.WriteErrorLine($"Error parsing friend count JSON for {account.Username}: {jex.Message}");
+                    Logger.LogError($"Error parsing friend count JSON for {account.Username}: {jex.Message}");
                 }
-                catch (Exception ex) { ConsoleUI.WriteErrorLine($"Error processing friend count response for {account.Username}: {ex.Message}"); }
+                catch (Exception ex) { Logger.LogError($"Error processing friend count response for {account.Username}: {ex.Message}"); }
             }
             return -1;
         }

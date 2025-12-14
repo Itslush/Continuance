@@ -3,7 +3,12 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35506.116
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bubbles07Reborn", "Bubbles07-Csharpified\Bubbles07Reborn.csproj", "{6F5BBAA4-81C2-46A8-B73E-52CA2C14FD32}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Continuance", "Bubbles07-Csharpified\Continuance.csproj", "{6F5BBAA4-81C2-46A8-B73E-52CA2C14FD32}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,5 +23,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0136380A-95F1-4450-ACA8-5229AD2A3BFB}
 	EndGlobalSection
 EndGlobal

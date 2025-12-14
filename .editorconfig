@@ -1,0 +1,4 @@
+﻿[*.cs]
+dotnet_diagnostic.CS9113.severity = silent
+dotnet_diagnostic.CS0219.severity = silent
+dotnet_analyzer_diagnostic.category-Interoperability.severity = silent

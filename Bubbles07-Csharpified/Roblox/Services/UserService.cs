@@ -3,7 +3,8 @@ using System.Text;
 using Newtonsoft.Json;
 using Continuance.Models;
 using Continuance.Roblox.Http;
-using Continuance.UI;
+using Spectre.Console;
+using Continuance.CLI;
 
 namespace Continuance.Roblox.Services
 {
@@ -11,18 +12,18 @@ namespace Continuance.Roblox.Services
     {
         private readonly RobloxHttpClient _robloxHttpClient = robloxHttpClient ?? throw new ArgumentNullException(nameof(robloxHttpClient));
 
-        public async Task<bool> SetDisplayNameAsync(Account account, string newDisplayName)
+        public static async Task<bool> SetDisplayNameAsync(Account account, string newDisplayName)
         {
-            if (account == null) { ConsoleUI.WriteErrorLine($"Cannot SetDisplayName: Account is null."); return false; }
+            if (account == null) { Logger.LogError("Cannot SetDisplayName: Account is null."); return false; }
 
             if (string.IsNullOrEmpty(account.XcsrfToken))
             {
-                ConsoleUI.WriteWarningLine($"Cannot SetDisplayName for {account.Username}: Missing XCSRF token.");
+                Logger.LogWarning($"Cannot SetDisplayName for {Markup.Escape(account.Username)}: Missing XCSRF token.");
                 return false;
             }
             if (string.IsNullOrWhiteSpace(newDisplayName) || newDisplayName.Length < 3 || newDisplayName.Length > 20)
             {
-                ConsoleUI.WriteErrorLine($"Cannot SetDisplayName for {account.Username}: Invalid name '{newDisplayName}'. Must be 3-20 characters, non-empty.");
+                Logger.LogError($"Cannot SetDisplayName for {Markup.Escape(account.Username)}: Invalid name '{Markup.Escape(newDisplayName)}'. Must be 3-20 characters, non-empty.");
                 return false;
             }
 
@@ -30,22 +31,22 @@ namespace Continuance.Roblox.Services
             var payload = new JObject { ["newDisplayName"] = newDisplayName };
             var content = new StringContent(payload.ToString(Formatting.None), Encoding.UTF8, "application/json");
 
-            bool success = await _robloxHttpClient.SendRequestAsync(
+            bool success = await RobloxHttpClient.SendRequestAsync(
                 HttpMethod.Patch,
                 url,
                 account,
                 content,
-                $"Set Display Name to '{newDisplayName}'",
+                $"Set Display Name to '{Markup.Escape(newDisplayName)}'",
                 allowRetryOnXcsrf: true
                 );
 
             return success;
         }
 
-        public async Task<(string? DisplayName, string? Username)> GetUsernamesAsync(Account account)
+        public static async Task<(string? DisplayName, string? Username)> GetUsernamesAsync(Account account)
         {
-            if (account == null) { ConsoleUI.WriteErrorLine($"Cannot GetUsernames: Account is null."); return (null, null); }
-            if (account.UserId <= 0) { ConsoleUI.WriteErrorLine($"Cannot GetUsernames: Invalid User ID ({account.UserId})."); return (null, null); }
+            if (account == null) { Logger.LogError("Cannot GetUsernames: Account is null."); return (null, null); }
+            if (account.UserId <= 0) { Logger.LogError($"Cannot GetUsernames: Invalid User ID ({account.UserId})."); return (null, null); }
 
             string url = $"{AppConfig.RobloxApiBaseUrl_Users}/v1/users/{account.UserId}";
 
@@ -55,7 +56,8 @@ namespace Continuance.Roblox.Services
                 account,
                 null,
                 $"Get User Info for {account.UserId}",
-                allowRetryOnXcsrf: false
+                allowRetryOnXcsrf: false,
+                suppressOutput: true
             );
 
             if (success && !string.IsNullOrEmpty(content))
@@ -68,7 +70,7 @@ namespace Continuance.Roblox.Services
 
                     if (!string.IsNullOrWhiteSpace(username) && account.Username != username && account.Username != "N/A")
                     {
-                        ConsoleUI.WriteInfoLine($"Updated username cache for ID {account.UserId} from '{account.Username}' to '{username}'.");
+                        Logger.LogInfo($"Updated username cache for ID {account.UserId} from '{Markup.Escape(account.Username)}' to '{Markup.Escape(username)}'.");
                         account.Username = username;
                     }
                     else if (!string.IsNullOrWhiteSpace(username) && account.Username == "N/A")
@@ -78,24 +80,24 @@ namespace Continuance.Roblox.Services
 
                     if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(username))
                     {
-                        ConsoleUI.WriteWarningLine($"Fetched user info for {account.UserId} has missing/empty name or displayName. Display: '{displayName ?? "null"}', User: '{username ?? "null"}'");
+                        Logger.LogWarning($"Fetched user info for {account.UserId} has missing/empty name or displayName. Display: '{Markup.Escape(displayName ?? "null")}', User: '{Markup.Escape(username ?? "null")}'");
                     }
 
                     return (displayName, username);
                 }
                 catch (JsonReaderException jex)
                 {
-                    ConsoleUI.WriteErrorLine($"Error parsing user info JSON for {account.UserId}: {jex.Message}");
+                    Logger.LogError($"Error parsing user info JSON for {account.UserId}: {Markup.Escape(jex.Message)}");
                 }
                 catch (Exception ex)
                 {
-                    ConsoleUI.WriteErrorLine($"Error processing user info for {account.UserId}: {ex.Message}");
+                    Logger.LogError($"Error processing user info for {account.UserId}: {Markup.Escape(ex.Message)}");
                 }
             }
             return (null, null);
         }
 
-        public async Task<string?> GetCurrentDisplayNameAsync(Account account)
+        public static async Task<string?> GetCurrentDisplayNameAsync(Account account)
         {
             var (displayName, _) = await GetUsernamesAsync(account);
             return displayName;

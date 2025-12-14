@@ -1,4 +1,5 @@
 ﻿using Continuance.Models;
+using Continuance.CLI;
 
 namespace Continuance
 {
@@ -6,11 +7,10 @@ namespace Continuance
     {
         public const int DefaultApiDelayMs = 2500;
         public const int DefaultFriendActionDelayMs = 10000;
-        public const int SafeApiDelayMs = 6000;
-        public const int SafeFriendActionDelayMs = 6000;
         public const int MinAllowedDelayMs = 500;
         public const int XcsrfRetryDelayMs = 5000;
         public const int RateLimitRetryDelayMs = 15000;
+        public const int DefaultImportDelayMs = 500;
 
         public const int DefaultMaxApiRetries = 3;
         public const int DefaultApiRetryDelayMs = 5000;
@@ -22,11 +22,12 @@ namespace Continuance
         public static int CurrentMaxApiRetries { get; set; } = DefaultMaxApiRetries;
         public static int CurrentApiRetryDelayMs { get; set; } = DefaultApiRetryDelayMs;
         public static int CurrentActionConfirmationThreshold { get; set; } = 15;
+        public static int CurrentImportDelayMs { get; set; } = DefaultImportDelayMs;
 
-        public const string DefaultDisplayName = "dotggslashrblxgenTCD";
+        public const string DefaultDisplayName = "ContinuanceGithub";
         public const long DefaultGroupId = 4165692;
         public const string DefaultBadgeGameId = "11525834465";
-        public const long DefaultTargetUserIdForAvatarCopy = 4075892082;
+        public const long DefaultTargetUserIdForAvatarCopy = 8228049441;
         public const string HomePageUrl = "https://www.roblox.com/home";
 
         public const int DefaultFriendGoal = 2;
@@ -39,8 +40,6 @@ namespace Continuance
         public static int RuntimeDefaultFriendGoal { get; set; } = DefaultFriendGoal;
         public static int RuntimeDefaultBadgeGoal { get; set; } = DefaultBadgeGoal;
 
-        public const string RobloxApiBaseUrl = "https://api.roblox.com";
-        public const string RobloxWebBaseUrl = "https://www.roblox.com";
         public const string RobloxApiBaseUrl_Users = "https://users.roblox.com";
         public const string RobloxApiBaseUrl_Friends = "https://friends.roblox.com";
         public const string RobloxApiBaseUrl_Avatar = "https://avatar.roblox.com";
@@ -48,6 +47,9 @@ namespace Continuance
         public const string RobloxApiBaseUrl_Badges = "https://badges.roblox.com";
         public const string RobloxApiBaseUrl_Auth = "https://auth.roblox.com";
         public const string RobloxApiBaseUrl_AccountInfo = "https://accountinformation.roblox.com";
+        public const string RobloxWebBaseUrl = "https://www.roblox.com";
+
+        public static bool HeadlessMode { get; set; } = false;
 
         public static void UpdateRuntimeDefaults(AppSettings settings)
         {
@@ -57,6 +59,7 @@ namespace Continuance
             CurrentMaxApiRetries = settings.MaxApiRetries >= 0 ? settings.MaxApiRetries : DefaultMaxApiRetries;
             CurrentApiRetryDelayMs = settings.ApiRetryDelayMs >= MinRetryDelayMs ? settings.ApiRetryDelayMs : DefaultApiRetryDelayMs;
             CurrentActionConfirmationThreshold = settings.ActionConfirmationThreshold >= 0 ? settings.ActionConfirmationThreshold : 15;
+            CurrentImportDelayMs = settings.ImportDelayMs >= 100 ? settings.ImportDelayMs : DefaultImportDelayMs;
 
             RuntimeDefaultDisplayName = !string.IsNullOrWhiteSpace(settings.DefaultDisplayName) ? settings.DefaultDisplayName : DefaultDisplayName;
             RuntimeDefaultGroupId = settings.DefaultGroupId > 0 ? settings.DefaultGroupId : DefaultGroupId;
@@ -64,6 +67,7 @@ namespace Continuance
             RuntimeDefaultTargetUserIdForAvatarCopy = settings.DefaultTargetUserIdForAvatarCopy > 0 ? settings.DefaultTargetUserIdForAvatarCopy : DefaultTargetUserIdForAvatarCopy;
             RuntimeDefaultFriendGoal = settings.DefaultFriendGoal >= 0 ? settings.DefaultFriendGoal : DefaultFriendGoal;
             RuntimeDefaultBadgeGoal = settings.DefaultBadgeGoal >= 0 ? settings.DefaultBadgeGoal : DefaultBadgeGoal;
+            HeadlessMode = settings.HeadlessMode;
         }
 
         public static AppSettings GetCurrentSettings()
@@ -75,13 +79,16 @@ namespace Continuance
                 RequestTimeoutSec = DefaultRequestTimeoutSec,
                 MaxApiRetries = CurrentMaxApiRetries,
                 ApiRetryDelayMs = CurrentApiRetryDelayMs,
+                ActionConfirmationThreshold = CurrentActionConfirmationThreshold,
+                ImportDelayMs = CurrentImportDelayMs,
                 DefaultDisplayName = RuntimeDefaultDisplayName,
                 DefaultGroupId = RuntimeDefaultGroupId,
                 DefaultBadgeGameId = RuntimeDefaultBadgeGameId,
                 DefaultTargetUserIdForAvatarCopy = RuntimeDefaultTargetUserIdForAvatarCopy,
                 DefaultFriendGoal = RuntimeDefaultFriendGoal,
                 DefaultBadgeGoal = RuntimeDefaultBadgeGoal,
-                ActionConfirmationThreshold = CurrentActionConfirmationThreshold
+                HeadlessMode = HeadlessMode,
+                Theme = Theme.Current
             };
         }
     }
