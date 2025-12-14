@@ -29,6 +29,8 @@ namespace Continuance
         private const string SettingsFilePath = "ContinuanceSettings.json";
         private const string AccountsFilePath = "ContinuanceAccounts.json";
 
+        private static BackgroundKeepAliveService? _bgService;
+
         private static void LoadSettings()
         {
             AppSettings settings = new();
@@ -144,7 +146,6 @@ namespace Continuance
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             try { Console.Title = "✦ Continuance ✦"; } catch { }
-
             Logger.Initialize();
 
             AccountManager? accountManager = null;
@@ -165,10 +166,8 @@ namespace Continuance
             {
                 Logger.LogHeader(" ✦ Continuance ✦ ");
                 Logger.LogInfo("Initializing Application Components...");
-                Logger.LogWarning("Please close any current Roblox Instance that you have opened to prevent conflicting with Multi-Instancing.");
 
                 LoadSettings();
-
                 await WebDriverManager.EnsureBrowserDownloadedAsync();
 
                 var robloxHttpClient = new RobloxHttpClient();
@@ -210,6 +209,9 @@ namespace Continuance
 
                 await RefreshAllTokensOnLaunch(accountManager);
 
+                _bgService = new BackgroundKeepAliveService(accountManager, authService);
+                _bgService.Start();
+
                 Logger.LogInfo("Clearing console and launching Main Menu...");
                 await Task.Delay(2500);
                 Console.Clear();
@@ -224,6 +226,8 @@ namespace Continuance
             }
             finally
             {
+                if (_bgService != null) await _bgService.StopAsync();
+
                 if (accountManager != null)
                 {
                     Logger.LogInfo("Attempting to save accounts before exiting...");

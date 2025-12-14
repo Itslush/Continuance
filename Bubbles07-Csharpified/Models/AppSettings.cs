@@ -16,6 +16,7 @@
         public int ActionConfirmationThreshold { get; set; } = 15;
         public int ImportDelayMs { get; set; } = AppConfig.DefaultImportDelayMs;
         public bool HeadlessMode { get; set; } = false;
+        public int BackgroundRefreshIntervalMinutes { get; set; } = AppConfig.DefaultBackgroundRefreshIntervalMinutes;
         public ColorPalette Theme { get; set; } = new();
     }
 }

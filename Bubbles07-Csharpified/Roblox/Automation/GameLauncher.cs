@@ -33,7 +33,7 @@ namespace Continuance.Roblox.Automation
                 string[] potentialBasePaths = [
                     Path.Combine(localAppData, "Fishstrap", "Versions"),
                     Path.Combine(localAppData, "Bloxstrap", "Versions"),
-                    Path.Combine(localAppData, "Roblox", "Versions")
+                    Path.Combine(localAppData, "Roblox"   , "Versions")
                 ];
 
                 foreach (var basePath in potentialBasePaths)
@@ -50,9 +50,7 @@ namespace Continuance.Roblox.Automation
                     {
                         string fullPath = Path.Combine(latestVersionDir.FullName, "RobloxPlayerBeta.exe");
                         string sourceName = new DirectoryInfo(basePath).Parent?.Name ?? "Roblox";
-
                         Logger.LogInfo($"Found Roblox Player ({sourceName}): {Markup.Escape(fullPath)}");
-
                         return fullPath;
                     }
                 }
@@ -143,19 +141,19 @@ namespace Continuance.Roblox.Automation
             }
         }
 
-        public static async Task<bool> LaunchClientWithRenameAsync(Account account, string gameId, int instanceNumber, bool renameWindow)
+        public static async Task<int?> LaunchClientWithRenameAsync(Account account, string gameId, int instanceNumber, bool renameWindow, bool minimizeForTiling)
         {
             EnsureMultiInstanceMutex();
             Logger.LogDefault($"   Starting multi-launch sequence for [{Theme.Current.Info}]{Markup.Escape(account.Username)}[/]...");
             if (string.IsNullOrWhiteSpace(account.Cookie))
             {
                 Logger.LogError("      FAIL: Account has no cookie.");
-                return false;
+                return null;
             }
             if (!long.TryParse(gameId, out long placeId) || placeId <= 0)
             {
                 Logger.LogError($"      FAIL: Invalid Game ID '{Markup.Escape(gameId)}'.");
-                return false;
+                return null;
             }
 
             Logger.LogDefault("      Requesting authentication ticket...");
@@ -163,25 +161,25 @@ namespace Continuance.Roblox.Automation
             if (!tokenRefreshed || string.IsNullOrEmpty(account.XcsrfToken))
             {
                 Logger.LogError("      FAIL: Could not refresh XCSRF token before requesting auth ticket.");
-                return false;
+                return null;
             }
             string? authTicket = await AuthenticationService.GetAuthenticationTicketAsync(account, gameId);
             if (string.IsNullOrEmpty(authTicket))
             {
                 Logger.LogError($"      FAIL: Authentication ticket was missing or invalid for {Markup.Escape(account.Username)}.");
-                return false;
+                return null;
             }
             Logger.LogSuccess("      Authentication ticket received.");
 
             Logger.LogDefault("      Locating Roblox executable...");
             string? robloxExePath = FindRobloxPlayerBeta();
-            if (string.IsNullOrEmpty(robloxExePath)) return false;
+            if (string.IsNullOrEmpty(robloxExePath)) return null;
 
             string? workingDirectory = Path.GetDirectoryName(robloxExePath);
             if (string.IsNullOrEmpty(workingDirectory))
             {
                 Logger.LogError($"      FAIL: Could not determine working directory from executable path.");
-                return false;
+                return null;
             }
 
             Logger.LogDefault("      Constructing launch arguments...");
@@ -219,65 +217,55 @@ namespace Continuance.Roblox.Automation
                 if (robloxProcess != null)
                 {
                     Logger.LogSuccess($"      Process started successfully (PID: {robloxProcess.Id}).");
+                    Logger.LogDefault($"      Waiting for window to initialize...");
 
-                    if (AppConfig.HeadlessMode)
+                    IntPtr windowHandle = await WindowManager.WaitForWindowHandleAsync(robloxProcess.Id);
+
+                    if (windowHandle != IntPtr.Zero)
                     {
-                        _ = WindowManager.ApplyHeadlessModeAsync(robloxProcess.Id);
+                        if (AppConfig.HeadlessMode)
+                        {
+                            WindowManager.ApplyHeadlessToHandle(windowHandle);
+                            Logger.LogSuccess("      [Headless] Window hidden.");
+                        }
+                        else
+                        {
+                            if (renameWindow)
+                            {
+                                string newTitle = $"[{account.UserId}] :: [{account.Username}] -- [#{instanceNumber + 1}]";
+                                _ = WindowManager.MonitorAndRenameWindowAsync(robloxProcess.Id, newTitle);
+                            }
+
+                            if (minimizeForTiling)
+                            {
+                                WindowManager.MinimizeWindow(windowHandle);
+                                Logger.LogSuccess("      Window minimized (queued for tiling).");
+                            }
+                            else
+                            {
+                                Logger.LogSuccess("      Window confirmed visible.");
+                            }
+                        }
                     }
-                    else if (renameWindow)
+                    else
                     {
-                        Logger.LogDefault("      Initiating window rename...");
-                        string newTitle = $"{account.Username} - Instance {instanceNumber + 1}";
-                        _ = WindowManager.TryRenameWindowAsync(robloxProcess.Id, newTitle);
+                        Logger.LogWarning("      Process started, but window did not appear within timeout.");
                     }
 
-                    await Task.Delay(1000);
-                    return true;
+                    return robloxProcess.Id;
                 }
                 else
                 {
                     Logger.LogError($"      FAIL: Process.Start returned null.");
-                    return false;
+                    return null;
                 }
             }
             catch (Exception ex)
             {
                 Logger.LogError($"      FAIL: An unexpected error occurred during process launch.");
                 Logger.LogError($"      Details: {Markup.Escape(ex.Message)}");
-                return false;
+                return null;
             }
-        }
-
-        public static async Task<bool> LaunchGameForBadgesAsync(Account account, string gameId, int badgeGoal)
-        {
-            EnsureMultiInstanceMutex();
-            if (string.IsNullOrWhiteSpace(account.Cookie))
-            {
-                Logger.LogError($"Cannot GetBadges for {account.Username}: Missing Cookie.");
-                return false;
-            }
-            if (badgeGoal <= 0)
-            {
-                Logger.LogInfo($"Skipping game launch for {account.Username}: Badge goal is zero or negative.");
-                return true;
-            }
-            if (string.IsNullOrWhiteSpace(gameId))
-            {
-                Logger.LogWarning($"Skipping game launch for {account.Username}: No Game ID provided.");
-                return false;
-            }
-
-            bool launchSuccess = await LaunchGameAsync(account, gameId);
-
-            if (launchSuccess)
-            {
-                Logger.LogWarning($"Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
-                await BadgeService.MonitorBadgeAcquisitionAsync(account, badgeGoal);
-                await TerminateRobloxProcessesAsync(account);
-                Logger.LogInfo($"GetBadges action sequence finished monitoring/termination for {account.Username}.");
-            }
-
-            return launchSuccess;
         }
 
         public static async Task<bool> LaunchFollowUserAsync(Account account, long targetUserId)
@@ -312,6 +300,38 @@ namespace Continuance.Roblox.Automation
                 return true;
             }
             catch { return false; }
+        }
+
+        public static async Task<bool> LaunchGameForBadgesAsync(Account account, string gameId, int badgeGoal)
+        {
+            EnsureMultiInstanceMutex();
+            if (string.IsNullOrWhiteSpace(account.Cookie))
+            {
+                Logger.LogError($"Cannot GetBadges for {account.Username}: Missing Cookie.");
+                return false;
+            }
+            if (badgeGoal <= 0)
+            {
+                Logger.LogInfo($"Skipping game launch for {account.Username}: Badge goal is zero or negative.");
+                return true;
+            }
+            if (string.IsNullOrWhiteSpace(gameId))
+            {
+                Logger.LogWarning($"Skipping game launch for {account.Username}: No Game ID provided.");
+                return false;
+            }
+
+            bool launchSuccess = await LaunchGameAsync(account, gameId);
+
+            if (launchSuccess)
+            {
+                Logger.LogWarning($"Please complete any actions required in the game to earn badges (aiming for {badgeGoal}).");
+                await BadgeService.MonitorBadgeAcquisitionAsync(account, badgeGoal);
+                await TerminateRobloxProcessesAsync(account);
+                Logger.LogInfo($"GetBadges action sequence finished monitoring/termination for {account.Username}.");
+            }
+
+            return launchSuccess;
         }
 
         private static async Task TerminateRobloxProcessesAsync(Account account)

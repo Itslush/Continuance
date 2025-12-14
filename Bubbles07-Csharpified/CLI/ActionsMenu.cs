@@ -1,5 +1,6 @@
 ﻿using Continuance.Actions;
 using Continuance.Core;
+using Continuance.Models;
 using Continuance.Roblox.Automation;
 using Continuance.Roblox.Services;
 using Spectre.Console;
@@ -305,6 +306,12 @@ namespace Continuance.CLI
 
                             bool renameWindows = AnsiConsole.Confirm($"   [[?]] Rename game windows with account name and instance number?\n   (Recommended: [{Theme.Current.Success}]Yes[/], disable if you suspect anti-cheat interference)", true);
 
+                            bool tileWindows = false;
+                            if (!AppConfig.HeadlessMode)
+                            {
+                                tileWindows = AnsiConsole.Confirm($"   [[?]] Auto-arrange windows in a grid after launching? (Windows will be minimized during launch)", true);
+                            }
+
                             await ExecuteCancellableAction(async (token) =>
                             {
                                 var validAccounts = _accountManager.GetSelectedAccounts().Where(a => a.IsValid).ToList();
@@ -318,6 +325,9 @@ namespace Continuance.CLI
 
                                 int successCount = 0;
                                 int failCount = 0;
+                                var failedRetries = new List<(Account Account, int Index)>();
+                                var launchedProcessIds = new List<int>();
+
                                 for (int i = 0; i < validAccounts.Count; i++)
                                 {
                                     token.ThrowIfCancellationRequested();
@@ -326,14 +336,16 @@ namespace Continuance.CLI
                                     Logger.NewLine();
                                     Logger.LogDefault($"[[[bold {Theme.Current.Accent1}]{i + 1}/{validAccounts.Count}[/]]] Launching game for: [{Theme.Current.Info}]{Markup.Escape(acc.Username)}[/] (ID: {acc.UserId})...");
 
-                                    bool success = await GameLauncher.LaunchClientWithRenameAsync(acc, gameIdToUse, i, renameWindows);
-                                    if (success)
+                                    int? pid = await GameLauncher.LaunchClientWithRenameAsync(acc, gameIdToUse, i, renameWindows, tileWindows);
+                                    if (pid != null)
                                     {
                                         successCount++;
+                                        launchedProcessIds.Add(pid.Value);
                                     }
                                     else
                                     {
                                         failCount++;
+                                        failedRetries.Add((acc, i));
                                     }
 
                                     if (i < validAccounts.Count - 1)
@@ -344,10 +356,54 @@ namespace Continuance.CLI
                                     }
                                 }
 
+                                if (failedRetries.Count > 0)
+                                {
+                                    Logger.NewLine();
+                                    AnsiConsole.Write(new Rule($"[bold {Theme.Current.Warning}]Retrying {failedRetries.Count} Failed Launch(es)[/]").LeftJustified());
+                                    Logger.LogInfo("Retrying launch for accounts that failed due to network errors...");
+
+                                    foreach (var (acc, idx) in failedRetries)
+                                    {
+                                        token.ThrowIfCancellationRequested();
+
+                                        if (!acc.IsValid)
+                                        {
+                                            Logger.LogWarning($"Skipping retry for {acc.Username}: Account marked invalid during process.");
+                                            continue;
+                                        }
+
+                                        Logger.NewLine();
+                                        Logger.LogDefault($"[[Retry]] Launching game for: [{Theme.Current.Info}]{Markup.Escape(acc.Username)}[/] (Instance {idx + 1})...");
+
+                                        await Task.Delay(2500, token);
+
+                                        int? retryPid = await GameLauncher.LaunchClientWithRenameAsync(acc, gameIdToUse, idx, renameWindows, tileWindows);
+
+                                        if (retryPid != null)
+                                        {
+                                            Logger.LogSuccess("Retry successful.");
+                                            successCount++;
+                                            failCount--;
+                                            launchedProcessIds.Add(retryPid.Value);
+                                        }
+                                        else
+                                        {
+                                            Logger.LogError($"Retry failed for {acc.Username}.");
+                                        }
+                                    }
+                                }
+
                                 Logger.NewLine();
                                 Logger.LogHeader("Multi-Launch Sequence Complete.");
                                 Logger.LogInfo($"Successfully launched: [{Theme.Current.Success}]{successCount}[/], Failed: [{Theme.Current.Error}]{failCount}[/].");
-                                if (renameWindows && !AppConfig.HeadlessMode)
+
+                                if (tileWindows && launchedProcessIds.Count > 0)
+                                {
+                                    Logger.LogInfo("Arranging windows in grid layout...");
+                                    WindowManager.TileWindows(launchedProcessIds);
+                                    Logger.LogSuccess("Windows arranged.");
+                                }
+                                else if (renameWindows && !AppConfig.HeadlessMode)
                                 {
                                     Logger.LogMuted("It may take some time for all game windows to appear and be renamed.");
                                 }

@@ -16,6 +16,8 @@ namespace Continuance
         public const int DefaultApiRetryDelayMs = 5000;
         public const int MinRetryDelayMs = 1000;
 
+        public const int DefaultBackgroundRefreshIntervalMinutes = 5;
+
         public static int CurrentApiDelayMs { get; set; } = DefaultApiDelayMs;
         public static int CurrentFriendActionDelayMs { get; set; } = DefaultFriendActionDelayMs;
         public static int DefaultRequestTimeoutSec { get; set; } = 45;
@@ -23,6 +25,8 @@ namespace Continuance
         public static int CurrentApiRetryDelayMs { get; set; } = DefaultApiRetryDelayMs;
         public static int CurrentActionConfirmationThreshold { get; set; } = 15;
         public static int CurrentImportDelayMs { get; set; } = DefaultImportDelayMs;
+
+        public static int BackgroundRefreshIntervalMinutes { get; set; } = DefaultBackgroundRefreshIntervalMinutes;
 
         public const string DefaultDisplayName = "ContinuanceGithub";
         public const long DefaultGroupId = 4165692;
@@ -68,6 +72,8 @@ namespace Continuance
             RuntimeDefaultFriendGoal = settings.DefaultFriendGoal >= 0 ? settings.DefaultFriendGoal : DefaultFriendGoal;
             RuntimeDefaultBadgeGoal = settings.DefaultBadgeGoal >= 0 ? settings.DefaultBadgeGoal : DefaultBadgeGoal;
             HeadlessMode = settings.HeadlessMode;
+
+            BackgroundRefreshIntervalMinutes = settings.BackgroundRefreshIntervalMinutes > 0 ? settings.BackgroundRefreshIntervalMinutes : DefaultBackgroundRefreshIntervalMinutes;
         }
 
         public static AppSettings GetCurrentSettings()
@@ -88,6 +94,7 @@ namespace Continuance
                 DefaultFriendGoal = RuntimeDefaultFriendGoal,
                 DefaultBadgeGoal = RuntimeDefaultBadgeGoal,
                 HeadlessMode = HeadlessMode,
+                BackgroundRefreshIntervalMinutes = BackgroundRefreshIntervalMinutes,
                 Theme = Theme.Current
             };
         }
